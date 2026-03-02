@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/transaction_model.dart';
@@ -9,6 +11,12 @@ import '../utils/helpers.dart';
 class AppProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
+
+  // ─── Stream subscriptions ───
+  StreamSubscription<User?>? _authSubscription;
+  StreamSubscription<List<TransactionModel>>? _transactionsSubscription;
+  StreamSubscription<List<CategoryModel>>? _categoriesSubscription;
+  bool _categoriesSeeded = false;
 
   // ─── Auth state ───
   User? _user;
@@ -58,13 +66,15 @@ class AppProvider extends ChangeNotifier {
 
   // ─── Initialization ───
   AppProvider() {
-    _authService.authStateChanges.listen((user) {
+    _authSubscription = _authService.authStateChanges.listen((user) {
       _user = user;
       if (user != null) {
         _onUserLoggedIn(user);
       } else {
+        _cancelDataSubscriptions();
         _transactions = [];
         _categories = [];
+        _categoriesSeeded = false;
       }
       notifyListeners();
     });
@@ -79,11 +89,15 @@ class AppProvider extends ChangeNotifier {
       photoUrl: user.photoURL ?? '',
     );
 
-    // Seed default categories
-    _firestoreService.seedDefaultCategories();
+    // Seed default categories only once per session
+    if (!_categoriesSeeded) {
+      _categoriesSeeded = true;
+      _firestoreService.seedDefaultCategories();
+    }
 
-    // Load categories
-    _firestoreService.getCategories().listen((cats) {
+    // Load categories (cancel previous listener first)
+    _categoriesSubscription?.cancel();
+    _categoriesSubscription = _firestoreService.getCategories().listen((cats) {
       _categories = cats;
       notifyListeners();
     }, onError: (e) {
@@ -95,11 +109,14 @@ class AppProvider extends ChangeNotifier {
   }
 
   void _loadTransactionsForMonth() {
+    // Cancel previous transaction listener to prevent memory leaks
+    _transactionsSubscription?.cancel();
+
     final start = Helpers.startOfMonth(_selectedDate);
     final end = Helpers.endOfMonth(_selectedDate);
 
     if (_filterMember == 'all') {
-      _firestoreService
+      _transactionsSubscription = _firestoreService
           .getTransactions(startDate: start, endDate: end)
           .listen((txns) {
         _transactions = txns;
@@ -108,7 +125,7 @@ class AppProvider extends ChangeNotifier {
         debugPrint('Error loading transactions: $e');
       });
     } else {
-      _firestoreService
+      _transactionsSubscription = _firestoreService
           .getUserTransactions(
               userId: _filterMember, startDate: start, endDate: end)
           .listen((txns) {
@@ -246,4 +263,18 @@ class AppProvider extends ChangeNotifier {
   /// Get family members stream
   Stream<List<Map<String, dynamic>>> get membersStream =>
       _firestoreService.getMembers();
+
+  void _cancelDataSubscriptions() {
+    _transactionsSubscription?.cancel();
+    _transactionsSubscription = null;
+    _categoriesSubscription?.cancel();
+    _categoriesSubscription = null;
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    _cancelDataSubscriptions();
+    super.dispose();
+  }
 }

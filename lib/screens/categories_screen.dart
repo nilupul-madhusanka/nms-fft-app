@@ -115,7 +115,7 @@ class CategoriesScreen extends StatelessWidget {
                   children: [
                     '💰', '💼', '💻', '🎁', '🛒', '🚗', '🔌', '🏥',
                     '📚', '🛍️', '🎬', '🎀', '📦', '🏠', '✈️', '🍔',
-                    '☕', '👗', '💊', '📱', '🎮', '⚽', '🎵', '🐾',
+                    '☕', '👗', '💊', '📱', '🎮', '🍉', '🎵', '🐾',
                   ]
                       .map((emoji) => GestureDetector(
                             onTap: () =>

@@ -118,15 +118,10 @@ class LoginScreen extends StatelessWidget {
                         : Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Image.network(
-                                'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
-                                height: 24,
-                                width: 24,
-                                errorBuilder: (context, error, stackTrace) => const Icon(
-                                  Icons.g_mobiledata,
-                                  size: 32,
-                                  color: AppTheme.primaryColor,
-                                ),
+                              const Icon(
+                                Icons.g_mobiledata,
+                                size: 32,
+                                color: AppTheme.primaryColor,
                               ),
                               const SizedBox(width: 12),
                               const Text(
@@ -143,7 +138,7 @@ class LoginScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                'Only family members can access this app',
+                'Developed by NMS Software Solutions - 2026',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: 0.6),
