@@ -42,9 +42,14 @@ class TransactionModel {
     };
   }
 
-  factory TransactionModel.fromMap(Map<String, dynamic> map) {
+  factory TransactionModel.fromMap(
+    Map<String, dynamic> map, {
+    String? documentId,
+  }) {
+    final date = (map['date'] as Timestamp).toDate();
+    final amount = (map['amount'] as num?)?.toDouble() ?? 0;
     return TransactionModel(
-      id: map['id'] ?? '',
+      id: documentId ?? map['id'] ?? '',
       userId: map['userId'] ?? '',
       userName: map['userName'] ?? '',
       userPhotoUrl: map['userPhotoUrl'] ?? '',
@@ -52,10 +57,10 @@ class TransactionModel {
           ? TransactionType.income
           : TransactionType.expense,
       category: map['category'] ?? '',
-      amount: (map['amount'] ?? 0).toDouble(),
+      amount: amount.isFinite ? amount : 0,
       note: map['note'] ?? '',
-      date: (map['date'] as Timestamp).toDate(),
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
+      date: date,
+      createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? date,
     );
   }
 

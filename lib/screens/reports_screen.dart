@@ -16,12 +16,23 @@ class ReportsScreen extends StatefulWidget {
 class _ReportsScreenState extends State<ReportsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  late final DateTime _reportDate;
+  late final Stream<List<TransactionModel>> _transactions;
   TransactionType _chartType = TransactionType.expense;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _reportDate = DateTime.now();
+    final weekStart = Helpers.startOfWeek(_reportDate);
+    final weekEnd = Helpers.startOfNextWeek(_reportDate);
+    final monthStart = Helpers.startOfMonth(_reportDate);
+    final monthEnd = Helpers.startOfNextMonth(_reportDate);
+    _transactions = context.read<AppProvider>().watchTransactions(
+      weekStart.isBefore(monthStart) ? weekStart : monthStart,
+      weekEnd.isAfter(monthEnd) ? weekEnd : monthEnd,
+    );
   }
 
   @override
@@ -32,6 +43,7 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<AppProvider>();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reports'),
@@ -47,20 +59,31 @@ class _ReportsScreenState extends State<ReportsScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _ReportView(
-            rangeType: _RangeType.week,
-            chartType: _chartType,
-            onChartTypeChanged: (t) => setState(() => _chartType = t),
-          ),
-          _ReportView(
-            rangeType: _RangeType.month,
-            chartType: _chartType,
-            onChartTypeChanged: (t) => setState(() => _chartType = t),
-          ),
-        ],
+      body: StreamBuilder<List<TransactionModel>>(
+        stream: _transactions,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Could not load reports.'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final transactions = provider.filterTransactions(snapshot.data!);
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              for (final range in _RangeType.values)
+                _ReportView(
+                  rangeType: range,
+                  reportDate: _reportDate,
+                  transactions: transactions,
+                  chartType: _chartType,
+                  onChartTypeChanged: (type) =>
+                      setState(() => _chartType = type),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -70,49 +93,78 @@ enum _RangeType { week, month }
 
 class _ReportView extends StatelessWidget {
   final _RangeType rangeType;
+  final DateTime reportDate;
+  final List<TransactionModel> transactions;
   final TransactionType chartType;
   final ValueChanged<TransactionType> onChartTypeChanged;
 
   const _ReportView({
     required this.rangeType,
+    required this.reportDate,
+    required this.transactions,
     required this.chartType,
     required this.onChartTypeChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<AppProvider>();
-    final now = DateTime.now();
-
     final DateTime start;
     final DateTime end;
     final String periodLabel;
 
     if (rangeType == _RangeType.week) {
-      start = Helpers.startOfWeek(now);
-      end = Helpers.endOfWeek(now);
+      start = Helpers.startOfWeek(reportDate);
+      end = Helpers.startOfNextWeek(reportDate);
       periodLabel =
-          '${Helpers.shortDate.format(start)} – ${Helpers.shortDate.format(end)}';
+          '${Helpers.shortDate.format(start)} – ${Helpers.shortDate.format(Helpers.addDays(end, -1))}';
     } else {
-      start = Helpers.startOfMonth(now);
-      end = Helpers.endOfMonth(now);
-      periodLabel = Helpers.monthYearFormat.format(now);
+      start = Helpers.startOfMonth(reportDate);
+      end = Helpers.startOfNextMonth(reportDate);
+      periodLabel = Helpers.monthYearFormat.format(reportDate);
     }
 
-    final rangeTransactions = provider.getTransactionsInRange(start, end);
-    final income = rangeTransactions
-        .where((t) => t.type == TransactionType.income)
-        .fold(0.0, (s, t) => s + t.amount);
-    final expense = rangeTransactions
-        .where((t) => t.type == TransactionType.expense)
-        .fold(0.0, (s, t) => s + t.amount);
+    var income = 0.0;
+    var expense = 0.0;
+    final categoryBreakdown = <String, double>{};
+    final memberBreakdown = <String, double>{};
+    final memberNames = <String, String>{};
+    final dailyTotals = <DateTime, Map<String, double>>{};
+    for (final transaction in transactions) {
+      if (!Helpers.isInRange(transaction.date, start, end)) continue;
+      final amount = transaction.amount;
+      final day = Helpers.startOfDay(transaction.date);
+      final totals = dailyTotals.putIfAbsent(day, () => {});
+      totals.update(
+        transaction.type.name,
+        (total) => total + amount,
+        ifAbsent: () => amount,
+      );
+      if (transaction.type == TransactionType.income) {
+        income += amount;
+      } else {
+        expense += amount;
+      }
+      if (transaction.type == chartType && amount > 0) {
+        categoryBreakdown.update(
+          transaction.category,
+          (total) => total + amount,
+          ifAbsent: () => amount,
+        );
+        final name = Helpers.displayName(transaction.userName);
+        final memberId = transaction.userId.isEmpty ? name : transaction.userId;
+        memberNames.putIfAbsent(memberId, () => name);
+        memberBreakdown.update(
+          memberId,
+          (total) => total + amount,
+          ifAbsent: () => amount,
+        );
+      }
+    }
     final balance = income - expense;
-
-    final categoryBreakdown =
-        provider.getCategoryBreakdown(chartType, start: start, end: end);
-    final memberBreakdown =
-        provider.getMemberBreakdown(chartType, start: start, end: end);
-    final dailyTotals = provider.getDailyTotals(start, end);
+    final memberTotal = memberBreakdown.values.fold(
+      0.0,
+      (sum, value) => sum + value,
+    );
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -150,7 +202,9 @@ class _ReportView extends StatelessWidget {
             _SummaryTile(
               label: 'Balance',
               amount: balance,
-              color: balance >= 0 ? AppTheme.incomeColor : AppTheme.expenseColor,
+              color: balance >= 0
+                  ? AppTheme.incomeColor
+                  : AppTheme.expenseColor,
               icon: Icons.account_balance_wallet_rounded,
             ),
           ],
@@ -186,14 +240,14 @@ class _ReportView extends StatelessWidget {
                 chartType == TransactionType.income,
               ],
               onPressed: (i) => onChartTypeChanged(
-                  i == 0 ? TransactionType.expense : TransactionType.income),
+                i == 0 ? TransactionType.expense : TransactionType.income,
+              ),
               borderRadius: BorderRadius.circular(8),
               selectedColor: Colors.white,
               fillColor: chartType == TransactionType.expense
                   ? AppTheme.expenseColor
                   : AppTheme.incomeColor,
-              constraints:
-                  const BoxConstraints(minWidth: 80, minHeight: 34),
+              constraints: const BoxConstraints(minWidth: 80, minHeight: 34),
               children: const [
                 Text('Expense', style: TextStyle(fontSize: 12)),
                 Text('Income', style: TextStyle(fontSize: 12)),
@@ -209,8 +263,10 @@ class _ReportView extends StatelessWidget {
             child: Padding(
               padding: EdgeInsets.all(32),
               child: Center(
-                child: Text('No data for this period',
-                    style: TextStyle(color: AppTheme.textSecondary)),
+                child: Text(
+                  'No data for this period',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ),
             ),
           )
@@ -230,8 +286,10 @@ class _ReportView extends StatelessWidget {
                   const SizedBox(height: 16),
                   // Legend
                   ...categoryBreakdown.entries.map((entry) {
-                    final total = categoryBreakdown.values
-                        .fold(0.0, (s, v) => s + v);
+                    final total = categoryBreakdown.values.fold(
+                      0.0,
+                      (s, v) => s + v,
+                    );
                     final percent = total > 0
                         ? (entry.value / total * 100).toStringAsFixed(1)
                         : '0';
@@ -244,16 +302,19 @@ class _ReportView extends StatelessWidget {
                             height: 12,
                             decoration: BoxDecoration(
                               color: _getColorForIndex(
-                                  categoryBreakdown.keys
-                                      .toList()
-                                      .indexOf(entry.key)),
+                                categoryBreakdown.keys.toList().indexOf(
+                                  entry.key,
+                                ),
+                              ),
                               borderRadius: BorderRadius.circular(3),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(entry.key,
-                                style: const TextStyle(fontSize: 13)),
+                            child: Text(
+                              entry.key,
+                              style: const TextStyle(fontSize: 13),
+                            ),
                           ),
                           Text(
                             '${Helpers.formatAmount(entry.value)}  ($percent%)',
@@ -280,8 +341,10 @@ class _ReportView extends StatelessWidget {
             child: Padding(
               padding: EdgeInsets.all(32),
               child: Center(
-                child: Text('No data for this period',
-                    style: TextStyle(color: AppTheme.textSecondary)),
+                child: Text(
+                  'No data for this period',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ),
             ),
           )
@@ -291,9 +354,7 @@ class _ReportView extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: memberBreakdown.entries.map((entry) {
-                  final total =
-                      memberBreakdown.values.fold(0.0, (s, v) => s + v);
-                  final fraction = total > 0 ? entry.value / total : 0.0;
+                  final fraction = entry.value / memberTotal;
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Column(
@@ -302,16 +363,21 @@ class _ReportView extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(entry.key,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w500)),
-                            Text(Helpers.formatAmount(entry.value),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: chartType == TransactionType.income
-                                      ? AppTheme.incomeColor
-                                      : AppTheme.expenseColor,
-                                )),
+                            Text(
+                              memberNames[entry.key]!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              Helpers.formatAmount(entry.value),
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: chartType == TransactionType.income
+                                    ? AppTheme.incomeColor
+                                    : AppTheme.expenseColor,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -376,9 +442,13 @@ class _SummaryTile extends StatelessWidget {
             children: [
               Icon(icon, color: color, size: 20),
               const SizedBox(height: 4),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 11, color: AppTheme.textSecondary)),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
               const SizedBox(height: 2),
               FittedBox(
                 child: Text(
@@ -443,10 +513,9 @@ class _DailyTrendChart extends StatelessWidget {
     // Build list of days
     final days = <DateTime>[];
     var current = Helpers.startOfDay(start);
-    final endDay = Helpers.startOfDay(end);
-    while (!current.isAfter(endDay)) {
+    while (current.isBefore(end)) {
       days.add(current);
-      current = current.add(const Duration(days: 1));
+      current = Helpers.addDays(current, 1);
     }
 
     if (days.isEmpty) {
@@ -467,7 +536,7 @@ class _DailyTrendChart extends StatelessWidget {
         maxY: maxVal > 0 ? maxVal * 1.2 : 100,
         barTouchData: BarTouchData(
           touchTooltipData: BarTouchTooltipData(
-            tooltipRoundedRadius: 8,
+            tooltipBorderRadius: BorderRadius.circular(8),
             getTooltipItem: (group, groupIndex, rod, rodIndex) {
               final label = rodIndex == 0 ? 'Income' : 'Expense';
               return BarTooltipItem(

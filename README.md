@@ -22,7 +22,7 @@ A cross-platform Flutter app for managing daily income and expenses as a family.
 
 | Layer | Technology |
 |---|---|
-| Framework | Flutter (Dart ^3.11.0) |
+| Framework | Flutter 3.47+ (Dart 3.13+) |
 | Auth | Firebase Auth + Google Sign-In |
 | Database | Cloud Firestore |
 | State Management | Provider (`ChangeNotifier`) |
@@ -61,7 +61,7 @@ lib/
 
 | Collection | Purpose |
 |---|---|
-| `family_transactions` | All income & expense records (queried by date range & user) |
+| `family_transactions` | All income & expense records (queried by date range) |
 | `categories` | Shared income & expense categories |
 | `members` | Family member profiles (synced on each login) |
 
@@ -69,7 +69,7 @@ lib/
 
 ### Prerequisites
 
-- Flutter SDK (Dart ^3.11.0)
+- Flutter 3.47 or later with Dart 3.13 or later
 - A Firebase project with **Authentication** (Google provider) and **Cloud Firestore** enabled
 
 ### Setup
@@ -77,7 +77,7 @@ lib/
 1. **Clone the repo**
    ```bash
    git clone https://github.com/nilupul-madhusanka/nms-fft-app.git
-   cd nms_fft_app
+   cd nms-fft-app
    ```
 
 2. **Firebase configuration**
@@ -100,7 +100,8 @@ lib/
 
 ### Android Notes
 
-- `minSdk` is set to **23** (required by Firebase Auth + Google Sign-In)
+- Android requires **API 24** or later for the current Firebase SDK.
+- For Google Sign-In, register the signing certificate's SHA-1 in Firebase Project settings. After the first Android build, run `./gradlew signingReport` from `android/` (`.\gradlew.bat signingReport` on Windows) to find the debug variant's SHA-1. Download a fresh `google-services.json` after registering it, then rebuild.
 
 ## Currency
 

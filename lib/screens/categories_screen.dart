@@ -28,16 +28,26 @@ class CategoriesScreen extends StatelessWidget {
             ],
           ),
         ),
-        body: TabBarView(
-          children: [
-            _CategoryList(
-                categories: provider.incomeCategories, type: 'income'),
-            _CategoryList(
-                categories: provider.expenseCategories, type: 'expense'),
-          ],
-        ),
+        body: provider.categoriesLoading
+            ? const Center(child: CircularProgressIndicator())
+            : provider.categoriesFailed
+            ? const Center(child: Text('Could not load categories.'))
+            : TabBarView(
+                children: [
+                  _CategoryList(
+                    categories: provider.incomeCategories,
+                    type: 'income',
+                  ),
+                  _CategoryList(
+                    categories: provider.expenseCategories,
+                    type: 'expense',
+                  ),
+                ],
+              ),
         floatingActionButton: FloatingActionButton(
-          onPressed: () => _showAddCategoryDialog(context),
+          onPressed: provider.categoriesLoading || provider.categoriesFailed
+              ? null
+              : () => _showAddCategoryDialog(context),
           child: const Icon(Icons.add),
         ),
       ),
@@ -45,7 +55,12 @@ class CategoriesScreen extends StatelessWidget {
   }
 
   void _showAddCategoryDialog(BuildContext context) {
-    final nameController = TextEditingController();
+    final provider = context.read<AppProvider>();
+    final categoryId = 'cat_${const Uuid().v4()}';
+    var categoryName = '';
+    String? nameError;
+    String? saveError;
+    var saving = false;
     String selectedType = 'expense';
     String selectedIcon = '📦';
 
@@ -54,8 +69,9 @@ class CategoriesScreen extends StatelessWidget {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           title: const Text('Add Category'),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -68,8 +84,12 @@ class CategoriesScreen extends StatelessWidget {
                       child: ChoiceChip(
                         label: const Text('Income'),
                         selected: selectedType == 'income',
-                        onSelected: (_) =>
-                            setDialogState(() => selectedType = 'income'),
+                        onSelected: saving
+                            ? null
+                            : (_) => setDialogState(() {
+                                selectedType = 'income';
+                                nameError = null;
+                              }),
                         selectedColor: AppTheme.incomeColor,
                         labelStyle: TextStyle(
                           color: selectedType == 'income'
@@ -83,8 +103,12 @@ class CategoriesScreen extends StatelessWidget {
                       child: ChoiceChip(
                         label: const Text('Expense'),
                         selected: selectedType == 'expense',
-                        onSelected: (_) =>
-                            setDialogState(() => selectedType = 'expense'),
+                        onSelected: saving
+                            ? null
+                            : (_) => setDialogState(() {
+                                selectedType = 'expense';
+                                nameError = null;
+                              }),
                         selectedColor: AppTheme.expenseColor,
                         labelStyle: TextStyle(
                           color: selectedType == 'expense'
@@ -98,74 +122,130 @@ class CategoriesScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 // Name
                 TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
+                  enabled: !saving,
+                  onChanged: (value) => setDialogState(() {
+                    categoryName = value;
+                    nameError = null;
+                  }),
+                  decoration: InputDecoration(
                     labelText: 'Category Name',
                     hintText: 'e.g., Rent',
+                    errorText: nameError,
                   ),
                 ),
                 const SizedBox(height: 16),
                 // Icon picker
-                const Text('Choose Icon',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Choose Icon',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: [
-                    '💰', '💼', '💻', '🎁', '🛒', '🚗', '🔌', '🏥',
-                    '📚', '🛍️', '🎬', '🎀', '📦', '🏠', '✈️', '🍔',
-                    '☕', '👗', '💊', '📱', '🎮', '🍉', '🎵', '🐾',
-                  ]
-                      .map((emoji) => GestureDetector(
-                            onTap: () =>
-                                setDialogState(() => selectedIcon = emoji),
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: selectedIcon == emoji
-                                    ? AppTheme.primaryColor
-                                        .withValues(alpha: 0.2)
-                                    : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                                border: selectedIcon == emoji
-                                    ? Border.all(
-                                        color: AppTheme.primaryColor, width: 2)
-                                    : null,
-                              ),
-                              child: Center(
-                                  child: Text(emoji,
-                                      style: const TextStyle(fontSize: 20))),
+                  children: categoryIcons
+                      .map(
+                        (emoji) => GestureDetector(
+                          onTap: saving
+                              ? null
+                              : () =>
+                                    setDialogState(() => selectedIcon = emoji),
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: selectedIcon == emoji
+                                  ? AppTheme.primaryColor.withValues(alpha: 0.2)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: selectedIcon == emoji
+                                  ? Border.all(
+                                      color: AppTheme.primaryColor,
+                                      width: 2,
+                                    )
+                                  : null,
                             ),
-                          ))
+                            child: Center(
+                              child: Text(
+                                emoji,
+                                style: const TextStyle(fontSize: 20),
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
                       .toList(),
                 ),
+                if (saveError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      saveError!,
+                      style: const TextStyle(color: AppTheme.expenseColor),
+                    ),
+                  ),
               ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: saving ? null : () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isEmpty) return;
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (saving) return;
+                      final name = categoryName.trim();
+                      final categories = selectedType == 'income'
+                          ? provider.incomeCategories
+                          : provider.expenseCategories;
+                      if (name.isEmpty) {
+                        setDialogState(
+                          () => nameError = 'Enter a category name.',
+                        );
+                        return;
+                      }
+                      if (categories.any(
+                        (category) =>
+                            category.id != categoryId &&
+                            category.name.trim().toLowerCase() ==
+                                name.toLowerCase(),
+                      )) {
+                        setDialogState(
+                          () => nameError = 'That category already exists.',
+                        );
+                        return;
+                      }
 
-                final category = CategoryModel(
-                  id: 'cat_${const Uuid().v4().substring(0, 8)}',
-                  name: name,
-                  icon: selectedIcon,
-                  type: selectedType,
-                  createdAt: DateTime.now(),
-                );
+                      final category = CategoryModel(
+                        id: categoryId,
+                        name: name,
+                        icon: selectedIcon,
+                        type: selectedType,
+                        createdAt: DateTime.now(),
+                      );
 
-                context.read<AppProvider>().addCategory(category);
-                Navigator.pop(ctx);
-              },
-              child: const Text('Add'),
+                      setDialogState(() {
+                        saving = true;
+                        saveError = null;
+                      });
+                      try {
+                        await provider.addCategory(category);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } catch (error) {
+                        debugPrint('Could not add category: $error');
+                        if (ctx.mounted) {
+                          setDialogState(() {
+                            saving = false;
+                            saveError =
+                                'Could not add the category. Try again.';
+                          });
+                        }
+                      }
+                    },
+              child: Text(saving ? 'Adding…' : 'Add'),
             ),
           ],
         ),
@@ -222,19 +302,26 @@ class _CategoryList extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: (type == 'income'
-                        ? AppTheme.incomeColor
-                        : AppTheme.expenseColor)
-                    .withValues(alpha: 0.15),
+                color:
+                    (type == 'income'
+                            ? AppTheme.incomeColor
+                            : AppTheme.expenseColor)
+                        .withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child:
-                  Center(child: Text(cat.icon, style: const TextStyle(fontSize: 22))),
+              child: Center(
+                child: Text(cat.icon, style: const TextStyle(fontSize: 22)),
+              ),
             ),
-            title: Text(cat.name,
-                style: const TextStyle(fontWeight: FontWeight.w500)),
+            title: Text(
+              cat.name,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
             trailing: IconButton(
-              icon: const Icon(Icons.delete_outline, color: AppTheme.expenseColor),
+              icon: const Icon(
+                Icons.delete_outline,
+                color: AppTheme.expenseColor,
+              ),
               onPressed: () => _confirmDelete(context, cat),
             ),
           ),
@@ -243,12 +330,14 @@ class _CategoryList extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, CategoryModel cat) {
-    showDialog(
+  Future<void> _confirmDelete(BuildContext context, CategoryModel cat) async {
+    final provider = context.read<AppProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Category'),
-        content: Text('Delete "${cat.name}"? This won\'t affect existing transactions.'),
+        content: Text('Delete "${cat.name}" from the category list?'),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
@@ -256,16 +345,27 @@ class _CategoryList extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
-              context.read<AppProvider>().deleteCategory(cat.id);
-              Navigator.pop(ctx);
-            },
-            style:
-                ElevatedButton.styleFrom(backgroundColor: AppTheme.expenseColor),
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.expenseColor,
+            ),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await provider.deleteCategory(cat.id);
+    } catch (error) {
+      debugPrint('Could not delete category: $error');
+      if (messenger.mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Could not delete the category. Try again.'),
+          ),
+        );
+      }
+    }
   }
 }

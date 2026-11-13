@@ -52,8 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ? FloatingActionButton.extended(
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(
-                    builder: (_) => const AddTransactionScreen()),
+                MaterialPageRoute(builder: (_) => const AddTransactionScreen()),
               ),
               icon: const Icon(Icons.add),
               label: const Text('Add'),
@@ -71,6 +70,7 @@ class _DashboardTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
     final user = provider.user;
+    final photoUrl = user?.photoURL ?? '';
     final grouped = provider.transactionsGroupedByDate;
 
     return CustomScrollView(
@@ -99,12 +99,16 @@ class _DashboardTab extends StatelessWidget {
                         children: [
                           CircleAvatar(
                             radius: 20,
-                            backgroundImage: user?.photoURL != null
-                                ? NetworkImage(user!.photoURL!)
+                            foregroundImage: photoUrl.isNotEmpty
+                                ? NetworkImage(photoUrl)
                                 : null,
-                            child: user?.photoURL == null
-                                ? const Icon(Icons.person, color: Colors.white)
+                            onForegroundImageError: photoUrl.isNotEmpty
+                                ? (_, _) {}
                                 : null,
+                            child: const Icon(
+                              Icons.person,
+                              color: Colors.white,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -112,7 +116,9 @@ class _DashboardTab extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Hello, ${user?.displayName?.split(' ').first ?? 'User'} 👋',
+                                  'Hello, ${Helpers.displayName(user?.displayName).split(' ').first} 👋',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 18,
@@ -120,11 +126,11 @@ class _DashboardTab extends StatelessWidget {
                                   ),
                                 ),
                                 Text(
-                                  Helpers.monthYearFormat
-                                      .format(provider.selectedDate),
+                                  Helpers.monthYearFormat.format(
+                                    provider.selectedDate,
+                                  ),
                                   style: TextStyle(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.8),
+                                    color: Colors.white.withValues(alpha: 0.8),
                                     fontSize: 13,
                                   ),
                                 ),
@@ -134,14 +140,16 @@ class _DashboardTab extends StatelessWidget {
                           // Month picker
                           IconButton(
                             onPressed: () => _pickMonth(context, provider),
-                            icon: const Icon(Icons.calendar_month,
-                                color: Colors.white),
+                            icon: const Icon(
+                              Icons.calendar_month,
+                              color: Colors.white,
+                            ),
                           ),
                           // Logout
                           IconButton(
-                            onPressed: () => _showLogoutDialog(context, provider),
-                            icon:
-                                const Icon(Icons.logout, color: Colors.white),
+                            onPressed: () =>
+                                _showLogoutDialog(context, provider),
+                            icon: const Icon(Icons.logout, color: Colors.white),
                           ),
                         ],
                       ),
@@ -188,20 +196,30 @@ class _DashboardTab extends StatelessWidget {
         ),
 
         // ─── Filter Chips ───
-        SliverToBoxAdapter(
-          child: _MemberFilterChips(),
-        ),
+        SliverToBoxAdapter(child: _MemberFilterChips()),
 
         // ─── Transaction List ───
-        if (grouped.isEmpty)
+        if (provider.transactionsLoading || provider.transactionsFailed)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: provider.transactionsLoading
+                  ? const CircularProgressIndicator()
+                  : const Text('Could not load transactions.'),
+            ),
+          )
+        else if (grouped.isEmpty)
           const SliverFillRemaining(
             hasScrollBody: false,
             child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.receipt_long_rounded,
-                      size: 64, color: AppTheme.textSecondary),
+                  Icon(
+                    Icons.receipt_long_rounded,
+                    size: 64,
+                    color: AppTheme.textSecondary,
+                  ),
                   SizedBox(height: 16),
                   Text(
                     'No transactions yet',
@@ -214,8 +232,10 @@ class _DashboardTab extends StatelessWidget {
                   SizedBox(height: 8),
                   Text(
                     'Tap + to add your first entry',
-                    style:
-                        TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -230,57 +250,63 @@ class _DashboardTab extends StatelessWidget {
                 .where((t) => t.type == TransactionType.expense)
                 .fold(0.0, (s, t) => s + t.amount);
 
-            return SliverMainAxisGroup(slivers: [
-              // Day Header
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        entry.key,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (dayIncome > 0)
+            return SliverMainAxisGroup(
+              key: ValueKey(entry.key),
+              slivers: [
+                // Day Header
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
                         Text(
-                          '+${Helpers.formatAmount(dayIncome)}',
+                          entry.key,
                           style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.incomeColor,
+                            fontSize: 15,
                             fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
                           ),
                         ),
-                      if (dayIncome > 0 && dayExpense > 0)
-                        const SizedBox(width: 8),
-                      if (dayExpense > 0)
-                        Text(
-                          '-${Helpers.formatAmount(dayExpense)}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.expenseColor,
-                            fontWeight: FontWeight.w600,
+                        const Spacer(),
+                        if (dayIncome > 0)
+                          Text(
+                            '+${Helpers.formatAmount(dayIncome)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.incomeColor,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                    ],
+                        if (dayIncome > 0 && dayExpense > 0)
+                          const SizedBox(width: 8),
+                        if (dayExpense > 0)
+                          Text(
+                            '-${Helpers.formatAmount(dayExpense)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.expenseColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              // Transactions
-              SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => TransactionCard(
-                    transaction: entry.value[index],
+                // Transactions
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => TransactionCard(
+                      key: ValueKey(entry.value[index].id),
+                      transaction: entry.value[index],
+                    ),
+                    childCount: entry.value.length,
                   ),
-                  childCount: entry.value.length,
                 ),
-              ),
-            ]);
+              ],
+            );
           }),
 
         // Bottom padding
@@ -298,7 +324,7 @@ class _DashboardTab extends StatelessWidget {
       lastDate: DateTime(now.year + 1),
       initialDatePickerMode: DatePickerMode.year,
     );
-    if (picked != null) {
+    if (picked != null && context.mounted) {
       provider.setSelectedDate(picked);
     }
   }
@@ -316,9 +342,21 @@ class _DashboardTab extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               Navigator.pop(ctx);
-              provider.signOut();
+              try {
+                await provider.signOut();
+              } catch (error) {
+                debugPrint('Could not sign out: $error');
+                if (messenger.mounted && provider.user != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Could not sign out. Try again.'),
+                    ),
+                  );
+                }
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.expenseColor,
@@ -340,6 +378,12 @@ class _MemberFilterChips extends StatelessWidget {
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: provider.membersStream,
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Could not load family members.'),
+          );
+        }
         final members = snapshot.data ?? [];
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -358,36 +402,38 @@ class _MemberFilterChips extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              ...members.map((m) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      avatar: CircleAvatar(
-                        backgroundImage: m['photoUrl'] != null &&
-                                (m['photoUrl'] as String).isNotEmpty
-                            ? NetworkImage(m['photoUrl'])
-                            : null,
-                        radius: 14,
-                        child: m['photoUrl'] == null ||
-                                (m['photoUrl'] as String).isEmpty
-                            ? Text(
-                                (m['displayName'] ?? 'U')[0].toUpperCase(),
-                                style: const TextStyle(fontSize: 12),
-                              )
-                            : null,
-                      ),
-                      label: Text(
-                          (m['displayName'] ?? 'User').split(' ').first),
-                      selected: provider.filterMember == m['uid'],
-                      onSelected: (_) =>
-                          provider.setFilterMember(m['uid'] ?? ''),
-                      selectedColor: AppTheme.primaryColor,
-                      labelStyle: TextStyle(
-                        color: provider.filterMember == m['uid']
-                            ? Colors.white
-                            : AppTheme.textPrimary,
+              ...members.map((m) {
+                final name = Helpers.displayName(m['displayName'] as String?);
+                final photoUrl = m['photoUrl'] as String? ?? '';
+                final uid = m['uid'] as String;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    avatar: CircleAvatar(
+                      foregroundImage: photoUrl.isNotEmpty
+                          ? NetworkImage(photoUrl)
+                          : null,
+                      onForegroundImageError: photoUrl.isNotEmpty
+                          ? (_, _) {}
+                          : null,
+                      radius: 14,
+                      child: Text(
+                        name.characters.first.toUpperCase(),
+                        style: const TextStyle(fontSize: 12),
                       ),
                     ),
-                  )),
+                    label: Text(name.split(' ').first),
+                    selected: provider.filterMember == uid,
+                    onSelected: (_) => provider.setFilterMember(uid),
+                    selectedColor: AppTheme.primaryColor,
+                    labelStyle: TextStyle(
+                      color: provider.filterMember == uid
+                          ? Colors.white
+                          : AppTheme.textPrimary,
+                    ),
+                  ),
+                );
+              }),
             ],
           ),
         );

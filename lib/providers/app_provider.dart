@@ -1,9 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/transaction_model.dart';
+import 'package:flutter/material.dart';
+
 import '../models/category_model.dart';
+import '../models/transaction_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../utils/helpers.dart';
@@ -12,257 +13,212 @@ class AppProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
 
-  // ─── Stream subscriptions ───
   StreamSubscription<User?>? _authSubscription;
   StreamSubscription<List<TransactionModel>>? _transactionsSubscription;
   StreamSubscription<List<CategoryModel>>? _categoriesSubscription;
-  bool _categoriesSeeded = false;
+  Stream<List<Map<String, dynamic>>>? membersStream;
 
-  // ─── Auth state ───
   User? _user;
   User? get user => _user;
-  bool _isLoading = false;
-  bool get isLoading => _isLoading;
+  bool _isInitializing = true;
+  bool get isInitializing => _isInitializing;
+  bool _isSigningIn = false;
+  bool get isSigningIn => _isSigningIn;
+  bool _disposed = false;
 
-  // ─── Data ───
-  List<TransactionModel> _transactions = [];
-  List<TransactionModel> get transactions => _transactions;
-
+  List<TransactionModel> _monthTransactions = [];
+  List<TransactionModel> get transactions =>
+      filterTransactions(_monthTransactions);
   List<CategoryModel> _categories = [];
-  List<CategoryModel> get categories => _categories;
 
   List<CategoryModel> get incomeCategories =>
-      _categories.where((c) => c.type == 'income').toList();
+      _categories.where((category) => category.type == 'income').toList();
   List<CategoryModel> get expenseCategories =>
-      _categories.where((c) => c.type == 'expense').toList();
+      _categories.where((category) => category.type == 'expense').toList();
 
-  // ─── Filters ───
+  bool _transactionsLoading = true;
+  bool get transactionsLoading => _transactionsLoading;
+  bool _transactionsFailed = false;
+  bool get transactionsFailed => _transactionsFailed;
+  bool _categoriesLoading = true;
+  bool get categoriesLoading => _categoriesLoading;
+  bool _categoriesFailed = false;
+  bool get categoriesFailed => _categoriesFailed;
+
   DateTime _selectedDate = DateTime.now();
   DateTime get selectedDate => _selectedDate;
 
-  String _filterMember = 'all'; // 'all' or user uid
+  String _filterMember = 'all';
   String get filterMember => _filterMember;
 
-  // ─── Computed values ───
-  double get totalIncome => _transactions
-      .where((t) => t.type == TransactionType.income)
-      .fold(0.0, (sum, t) => sum + t.amount);
-
-  double get totalExpense => _transactions
-      .where((t) => t.type == TransactionType.expense)
-      .fold(0.0, (sum, t) => sum + t.amount);
-
+  double get totalIncome => transactions
+      .where((transaction) => transaction.type == TransactionType.income)
+      .fold(0.0, (sum, transaction) => sum + transaction.amount);
+  double get totalExpense => transactions
+      .where((transaction) => transaction.type == TransactionType.expense)
+      .fold(0.0, (sum, transaction) => sum + transaction.amount);
   double get balance => totalIncome - totalExpense;
 
-  List<TransactionModel> get todayTransactions {
-    final today = Helpers.startOfDay(DateTime.now());
-    final endToday = Helpers.endOfDay(DateTime.now());
-    return _transactions
-        .where((t) =>
-            t.date.isAfter(today.subtract(const Duration(seconds: 1))) &&
-            t.date.isBefore(endToday.add(const Duration(seconds: 1))))
-        .toList();
-  }
-
-  // ─── Initialization ───
   AppProvider() {
-    _authSubscription = _authService.authStateChanges.listen((user) {
-      _user = user;
-      if (user != null) {
-        _onUserLoggedIn(user);
-      } else {
-        _cancelDataSubscriptions();
-        _transactions = [];
-        _categories = [];
-        _categoriesSeeded = false;
-      }
-      notifyListeners();
-    });
+    _authSubscription = _authService.authStateChanges.listen(
+      (user) {
+        _isInitializing = false;
+        if (_user?.uid != user?.uid) {
+          _cancelDataSubscriptions();
+          _user = user;
+          _monthTransactions = [];
+          _categories = [];
+          _filterMember = 'all';
+          _selectedDate = DateTime.now();
+          membersStream = null;
+
+          if (user != null) {
+            membersStream = _firestoreService.getMembers();
+            _loadCategories();
+            _loadTransactionsForMonth();
+            unawaited(_saveMember(user));
+          }
+        }
+        notifyListeners();
+      },
+      onError: (Object error) {
+        debugPrint('Could not restore the sign-in session: $error');
+        _isInitializing = false;
+        notifyListeners();
+      },
+    );
   }
 
-  void _onUserLoggedIn(User user) {
-    // Save member info
-    _firestoreService.saveMember(
-      uid: user.uid,
-      displayName: user.displayName ?? 'Unknown',
-      email: user.email ?? '',
-      photoUrl: user.photoURL ?? '',
-    );
-
-    // Seed default categories only once per session
-    if (!_categoriesSeeded) {
-      _categoriesSeeded = true;
-      _firestoreService.seedDefaultCategories();
+  Future<void> _saveMember(User user) async {
+    try {
+      await _firestoreService.saveMember(
+        uid: user.uid,
+        displayName: Helpers.displayName(user.displayName),
+        email: user.email ?? '',
+        photoUrl: user.photoURL ?? '',
+      );
+    } catch (error) {
+      debugPrint('Could not sync the member profile: $error');
     }
+  }
 
-    // Load categories (cancel previous listener first)
-    _categoriesSubscription?.cancel();
-    _categoriesSubscription = _firestoreService.getCategories().listen((cats) {
-      _categories = cats;
-      notifyListeners();
-    }, onError: (e) {
-      debugPrint('Error loading categories: $e');
-    });
+  void _loadCategories() {
+    _categoriesLoading = true;
+    _categoriesFailed = false;
+    _categoriesSubscription = _firestoreService.getCategories().listen(
+      (categories) {
+        _categories = categories;
+        _categoriesLoading = false;
+        notifyListeners();
+      },
+      onError: (Object error) {
+        debugPrint('Could not load categories: $error');
+        _categoriesLoading = false;
+        _categoriesFailed = true;
+        notifyListeners();
+      },
+    );
+    unawaited(_seedDefaultCategories());
+  }
 
-    // Load transactions for current selected day view (whole month by default)
-    _loadTransactionsForMonth();
+  Future<void> _seedDefaultCategories() async {
+    try {
+      await _firestoreService.seedDefaultCategories();
+    } catch (error) {
+      debugPrint('Could not create default categories: $error');
+    }
   }
 
   void _loadTransactionsForMonth() {
-    // Cancel previous transaction listener to prevent memory leaks
     _transactionsSubscription?.cancel();
-
-    final start = Helpers.startOfMonth(_selectedDate);
-    final end = Helpers.endOfMonth(_selectedDate);
-
-    if (_filterMember == 'all') {
-      _transactionsSubscription = _firestoreService
-          .getTransactions(startDate: start, endDate: end)
-          .listen((txns) {
-        _transactions = txns;
-        notifyListeners();
-      }, onError: (e) {
-        debugPrint('Error loading transactions: $e');
-      });
-    } else {
-      _transactionsSubscription = _firestoreService
-          .getUserTransactions(
-              userId: _filterMember, startDate: start, endDate: end)
-          .listen((txns) {
-        _transactions = txns;
-        notifyListeners();
-      }, onError: (e) {
-        debugPrint('Error loading user transactions: $e');
-      });
-    }
+    _monthTransactions = [];
+    _transactionsLoading = true;
+    _transactionsFailed = false;
+    _transactionsSubscription =
+        watchTransactions(
+          Helpers.startOfMonth(_selectedDate),
+          Helpers.startOfNextMonth(_selectedDate),
+        ).listen(
+          (transactions) {
+            _monthTransactions = transactions;
+            _transactionsLoading = false;
+            notifyListeners();
+          },
+          onError: (Object error) {
+            debugPrint('Could not load transactions: $error');
+            _transactionsLoading = false;
+            _transactionsFailed = true;
+            notifyListeners();
+          },
+        );
   }
 
-  // ─── Actions ───
+  Stream<List<TransactionModel>> watchTransactions(
+    DateTime start,
+    DateTime end,
+  ) => _firestoreService.getTransactions(startDate: start, endDate: end);
 
-  Future<bool> signInWithGoogle() async {
-    _isLoading = true;
+  List<TransactionModel> filterTransactions(
+    List<TransactionModel> transactions,
+  ) {
+    if (_filterMember == 'all') return transactions;
+    return transactions
+        .where((transaction) => transaction.userId == _filterMember)
+        .toList();
+  }
+
+  Future<void> signInWithGoogle() async {
+    if (_isSigningIn) return;
+    _isSigningIn = true;
     notifyListeners();
     try {
-      final user = await _authService.signInWithGoogle();
-      _isLoading = false;
-      notifyListeners();
-      return user != null;
-    } catch (e) {
-      _isLoading = false;
-      notifyListeners();
-      return false;
+      await _authService.signInWithGoogle();
+    } finally {
+      _isSigningIn = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
-  Future<void> signOut() async {
-    await _authService.signOut();
-  }
+  Future<void> signOut() => _authService.signOut();
 
-  Future<void> addTransaction(TransactionModel transaction) async {
-    await _firestoreService.addTransaction(transaction);
-  }
+  Future<void> addTransaction(TransactionModel transaction) =>
+      _firestoreService.addTransaction(transaction);
 
-  Future<void> updateTransaction(TransactionModel transaction) async {
-    await _firestoreService.updateTransaction(transaction);
-  }
+  Future<void> updateTransaction(TransactionModel transaction) =>
+      _firestoreService.updateTransaction(transaction);
 
-  Future<void> deleteTransaction(String id) async {
-    await _firestoreService.deleteTransaction(id);
-  }
+  Future<void> deleteTransaction(String id) =>
+      _firestoreService.deleteTransaction(id);
 
-  Future<void> addCategory(CategoryModel category) async {
-    await _firestoreService.addCategory(category);
-  }
+  Future<void> addCategory(CategoryModel category) =>
+      _firestoreService.addCategory(category);
 
-  Future<void> deleteCategory(String id) async {
-    await _firestoreService.deleteCategory(id);
-  }
+  Future<void> deleteCategory(String id) =>
+      _firestoreService.deleteCategory(id);
 
   void setSelectedDate(DateTime date) {
+    if (Helpers.startOfMonth(_selectedDate) == Helpers.startOfMonth(date)) {
+      return;
+    }
     _selectedDate = date;
     _loadTransactionsForMonth();
     notifyListeners();
   }
 
   void setFilterMember(String uid) {
+    if (_filterMember == uid) return;
     _filterMember = uid;
-    _loadTransactionsForMonth();
     notifyListeners();
   }
 
-  /// Get transactions grouped by date for display
   Map<String, List<TransactionModel>> get transactionsGroupedByDate {
-    final Map<String, List<TransactionModel>> grouped = {};
-    for (final t in _transactions) {
-      final key = Helpers.dayFormat.format(t.date);
-      grouped.putIfAbsent(key, () => []).add(t);
+    final grouped = <String, List<TransactionModel>>{};
+    for (final transaction in transactions) {
+      final day = Helpers.dayFormat.format(transaction.date);
+      grouped.putIfAbsent(day, () => []).add(transaction);
     }
     return grouped;
   }
-
-  /// Get transactions for a specific date range
-  List<TransactionModel> getTransactionsInRange(
-      DateTime start, DateTime end) {
-    return _transactions
-        .where((t) =>
-            t.date.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            t.date.isBefore(end.add(const Duration(seconds: 1))))
-        .toList();
-  }
-
-  /// Category-wise breakdown
-  Map<String, double> getCategoryBreakdown(TransactionType type,
-      {DateTime? start, DateTime? end}) {
-    final filtered = (start != null && end != null
-            ? getTransactionsInRange(start, end)
-            : _transactions)
-        .where((t) => t.type == type);
-
-    final Map<String, double> breakdown = {};
-    for (final t in filtered) {
-      breakdown[t.category] = (breakdown[t.category] ?? 0) + t.amount;
-    }
-    return breakdown;
-  }
-
-  /// Member-wise breakdown
-  Map<String, double> getMemberBreakdown(TransactionType type,
-      {DateTime? start, DateTime? end}) {
-    final filtered = (start != null && end != null
-            ? getTransactionsInRange(start, end)
-            : _transactions)
-        .where((t) => t.type == type);
-
-    final Map<String, double> breakdown = {};
-    for (final t in filtered) {
-      breakdown[t.userName] = (breakdown[t.userName] ?? 0) + t.amount;
-    }
-    return breakdown;
-  }
-
-  /// Daily totals for chart
-  Map<DateTime, Map<String, double>> getDailyTotals(
-      DateTime start, DateTime end) {
-    final Map<DateTime, Map<String, double>> dailyTotals = {};
-    final rangeTransactions = getTransactionsInRange(start, end);
-
-    for (final t in rangeTransactions) {
-      final day = Helpers.startOfDay(t.date);
-      dailyTotals.putIfAbsent(day, () => {'income': 0, 'expense': 0});
-      if (t.type == TransactionType.income) {
-        dailyTotals[day]!['income'] =
-            dailyTotals[day]!['income']! + t.amount;
-      } else {
-        dailyTotals[day]!['expense'] =
-            dailyTotals[day]!['expense']! + t.amount;
-      }
-    }
-    return dailyTotals;
-  }
-
-  /// Get family members stream
-  Stream<List<Map<String, dynamic>>> get membersStream =>
-      _firestoreService.getMembers();
 
   void _cancelDataSubscriptions() {
     _transactionsSubscription?.cancel();
@@ -273,6 +229,7 @@ class AppProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _authSubscription?.cancel();
     _cancelDataSubscriptions();
     super.dispose();

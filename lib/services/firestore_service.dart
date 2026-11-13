@@ -6,10 +6,12 @@ class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   // ─── Collection references ───
-  CollectionReference get _transactionsRef =>
+  CollectionReference<Map<String, dynamic>> get _transactionsRef =>
       _db.collection('family_transactions');
-  CollectionReference get _categoriesRef => _db.collection('categories');
-  CollectionReference get _membersRef => _db.collection('members');
+  CollectionReference<Map<String, dynamic>> get _categoriesRef =>
+      _db.collection('categories');
+  CollectionReference<Map<String, dynamic>> get _membersRef =>
+      _db.collection('members');
 
   // ─── MEMBER MANAGEMENT ───
 
@@ -52,34 +54,18 @@ class FirestoreService {
     required DateTime endDate,
   }) {
     return _transactionsRef
-        .where('date',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
-        .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+        .where('date', isLessThan: Timestamp.fromDate(endDate))
         .orderBy('date', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) =>
-                TransactionModel.fromMap(doc.data() as Map<String, dynamic>))
-            .toList());
-  }
-
-  /// Stream transactions for a specific user & date range
-  Stream<List<TransactionModel>> getUserTransactions({
-    required String userId,
-    required DateTime startDate,
-    required DateTime endDate,
-  }) {
-    return _transactionsRef
-        .where('userId', isEqualTo: userId)
-        .where('date',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
-        .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
-        .orderBy('date', descending: true)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) =>
-                TransactionModel.fromMap(doc.data() as Map<String, dynamic>))
-            .toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map(
+                (doc) =>
+                    TransactionModel.fromMap(doc.data(), documentId: doc.id),
+              )
+              .toList(),
+        );
   }
 
   // ─── CATEGORY CRUD ───
@@ -99,99 +85,117 @@ class FirestoreService {
     return _categoriesRef
         .orderBy('name')
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) =>
-                CategoryModel.fromMap(doc.data() as Map<String, dynamic>))
-            .toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map(
+                (doc) => CategoryModel.fromMap(doc.data(), documentId: doc.id),
+              )
+              .toList(),
+        );
   }
 
   /// Seed default categories if collection is empty
   Future<void> seedDefaultCategories() async {
-    final snapshot = await _categoriesRef.limit(1).get();
+    final snapshot = await _categoriesRef
+        .limit(1)
+        .get(const GetOptions(source: Source.server));
     if (snapshot.docs.isNotEmpty) return; // already has categories
 
     final now = DateTime.now();
     final defaults = [
       // Income categories
       CategoryModel(
-          id: 'cat_salary',
-          name: 'Salary',
-          icon: '💼',
-          type: 'income',
-          createdAt: now),
+        id: 'cat_salary',
+        name: 'Salary',
+        icon: '💼',
+        type: 'income',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_freelance',
-          name: 'Freelance',
-          icon: '💻',
-          type: 'income',
-          createdAt: now),
+        id: 'cat_freelance',
+        name: 'Freelance',
+        icon: '💻',
+        type: 'income',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_gift_in',
-          name: 'Gift Received',
-          icon: '🎁',
-          type: 'income',
-          createdAt: now),
+        id: 'cat_gift_in',
+        name: 'Gift Received',
+        icon: '🎁',
+        type: 'income',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_other_in',
-          name: 'Other Income',
-          icon: '💰',
-          type: 'income',
-          createdAt: now),
+        id: 'cat_other_in',
+        name: 'Other Income',
+        icon: '💰',
+        type: 'income',
+        createdAt: now,
+      ),
       // Expense categories
       CategoryModel(
-          id: 'cat_food',
-          name: 'Food & Grocery',
-          icon: '🛒',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_food',
+        name: 'Food & Grocery',
+        icon: '🛒',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_transport',
-          name: 'Transport',
-          icon: '🚗',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_transport',
+        name: 'Transport',
+        icon: '🚗',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_bills',
-          name: 'Bills & Utilities',
-          icon: '🔌',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_bills',
+        name: 'Bills & Utilities',
+        icon: '🔌',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_health',
-          name: 'Health',
-          icon: '🏥',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_health',
+        name: 'Health',
+        icon: '🏥',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_education',
-          name: 'Education',
-          icon: '📚',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_education',
+        name: 'Education',
+        icon: '📚',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_shopping',
-          name: 'Shopping',
-          icon: '🛍️',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_shopping',
+        name: 'Shopping',
+        icon: '🛍️',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_entertainment',
-          name: 'Entertainment',
-          icon: '🎬',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_entertainment',
+        name: 'Entertainment',
+        icon: '🎬',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_gift_out',
-          name: 'Gift Given',
-          icon: '🎀',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_gift_out',
+        name: 'Gift Given',
+        icon: '🎀',
+        type: 'expense',
+        createdAt: now,
+      ),
       CategoryModel(
-          id: 'cat_other_exp',
-          name: 'Other Expense',
-          icon: '📦',
-          type: 'expense',
-          createdAt: now),
+        id: 'cat_other_exp',
+        name: 'Other Expense',
+        icon: '📦',
+        type: 'expense',
+        createdAt: now,
+      ),
     ];
 
     final batch = _db.batch();
@@ -203,7 +207,9 @@ class FirestoreService {
 
   /// Get family members
   Stream<List<Map<String, dynamic>>> getMembers() {
-    return _membersRef.snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList());
+    return _membersRef.snapshots().map(
+      (snapshot) =>
+          snapshot.docs.map((doc) => {...doc.data(), 'uid': doc.id}).toList(),
+    );
   }
 }

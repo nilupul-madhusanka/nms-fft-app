@@ -1,42 +1,46 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  late final Future<void> _googleInitialization = _googleSignIn.initialize();
 
-  // Stream to listen to auth state changes
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // Get current user
-  User? get currentUser => _auth.currentUser;
-
-  // Sign in with Google
-  Future<User?> signInWithGoogle() async {
+  Future<void> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null; // User cancelled
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
+      if (kIsWeb) {
+        await _auth.signInWithPopup(GoogleAuthProvider());
+        return;
+      }
+      await _googleInitialization;
+      final account = await _googleSignIn.authenticate();
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+        idToken: account.authentication.idToken,
       );
-
-      final UserCredential userCredential =
-          await _auth.signInWithCredential(credential);
-
-      return userCredential.user;
-    } catch (e) {
+      await _auth.signInWithCredential(credential);
+    } on GoogleSignInException catch (error) {
+      if (error.code == GoogleSignInExceptionCode.canceled) return;
+      rethrow;
+    } on FirebaseAuthException catch (error) {
+      if (error.code == 'popup-closed-by-user' ||
+          error.code == 'cancelled-popup-request') {
+        return;
+      }
       rethrow;
     }
   }
 
-  // Sign out
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
-    await _auth.signOut();
+    try {
+      if (!kIsWeb) {
+        await _googleInitialization;
+        await _googleSignIn.signOut();
+      }
+    } finally {
+      await _auth.signOut();
+    }
   }
 }

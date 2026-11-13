@@ -38,8 +38,8 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
 
-    // Show splash while Firebase is initialising
-    if (provider.isLoading) {
+    // Wait for Firebase Auth to restore any existing session.
+    if (provider.isInitializing) {
       return const Scaffold(
         body: Center(
           child: CircularProgressIndicator(),

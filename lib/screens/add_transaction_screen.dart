@@ -19,6 +19,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
+  late final String _newTransactionId = const Uuid().v4();
 
   TransactionType _type = TransactionType.expense;
   String? _selectedCategory;
@@ -33,7 +34,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (isEditing) {
       final t = widget.editTransaction!;
       _type = t.type;
-      _amountController.text = t.amount.toStringAsFixed(2);
+      _amountController.text = t.amount.toString();
       _noteController.text = t.note;
       _selectedCategory = t.category;
       _selectedDate = t.date;
@@ -53,6 +54,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     final categories = _type == TransactionType.income
         ? provider.incomeCategories
         : provider.expenseCategories;
+    final original = widget.editTransaction;
+    final originalCategoryMissing =
+        original != null &&
+        original.type == _type &&
+        !categories.any((category) => category.name == original.category);
 
     return Scaffold(
       appBar: AppBar(
@@ -70,7 +76,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, 2)),
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
                 ],
               ),
               child: Row(
@@ -78,6 +87,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   Expanded(
                     child: GestureDetector(
                       onTap: () => setState(() {
+                        if (_type == TransactionType.income) return;
                         _type = TransactionType.income;
                         _selectedCategory = null;
                       }),
@@ -117,6 +127,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   Expanded(
                     child: GestureDetector(
                       onTap: () => setState(() {
+                        if (_type == TransactionType.expense) return;
                         _type = TransactionType.expense;
                         _selectedCategory = null;
                       }),
@@ -159,14 +170,19 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             const SizedBox(height: 24),
 
             // ─── Amount ───
-            const Text('Amount',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            const Text(
+              'Amount',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
             TextFormField(
               controller: _amountController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 prefixText: 'Rs. ',
                 hintText: '0.00',
@@ -181,80 +197,116 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               validator: (val) {
                 if (val == null || val.isEmpty) return 'Enter an amount';
                 final amount = double.tryParse(val);
-                if (amount == null || amount <= 0) return 'Enter a valid amount';
+                if (amount == null || !amount.isFinite || amount <= 0) {
+                  return 'Enter a valid amount';
+                }
                 return null;
               },
             ),
             const SizedBox(height: 20),
 
             // ─── Category ───
-            const Text('Category',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            const Text(
+              'Category',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: categories.map((cat) {
-                final isSelected = _selectedCategory == cat.name;
-                return ChoiceChip(
-                  label: Text('${cat.icon} ${cat.name}'),
-                  selected: isSelected,
-                  onSelected: (_) =>
-                      setState(() => _selectedCategory = cat.name),
-                  selectedColor: _type == TransactionType.income
-                      ? AppTheme.incomeColor.withValues(alpha: 0.2)
-                      : AppTheme.expenseColor.withValues(alpha: 0.2),
-                  labelStyle: TextStyle(
-                    color: isSelected
-                        ? (_type == TransactionType.income
-                            ? AppTheme.incomeColor
-                            : AppTheme.expenseColor)
-                        : AppTheme.textPrimary,
-                    fontWeight:
-                        isSelected ? FontWeight.w600 : FontWeight.normal,
+              children: [
+                if (originalCategoryMissing)
+                  ChoiceChip(
+                    label: Text(original.category),
+                    selected: _selectedCategory == original.category,
+                    onSelected: (_) =>
+                        setState(() => _selectedCategory = original.category),
                   ),
-                  backgroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    side: BorderSide(
+                ...categories.map((cat) {
+                  final isSelected = _selectedCategory == cat.name;
+                  return ChoiceChip(
+                    label: Text('${cat.icon} ${cat.name}'),
+                    selected: isSelected,
+                    onSelected: (_) =>
+                        setState(() => _selectedCategory = cat.name),
+                    selectedColor: _type == TransactionType.income
+                        ? AppTheme.incomeColor.withValues(alpha: 0.2)
+                        : AppTheme.expenseColor.withValues(alpha: 0.2),
+                    labelStyle: TextStyle(
                       color: isSelected
                           ? (_type == TransactionType.income
-                              ? AppTheme.incomeColor
-                              : AppTheme.expenseColor)
-                          : AppTheme.dividerColor,
+                                ? AppTheme.incomeColor
+                                : AppTheme.expenseColor)
+                          : AppTheme.textPrimary,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
-                  ),
-                );
-              }).toList(),
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(
+                        color: isSelected
+                            ? (_type == TransactionType.income
+                                  ? AppTheme.incomeColor
+                                  : AppTheme.expenseColor)
+                            : AppTheme.dividerColor,
+                      ),
+                    ),
+                  );
+                }),
+              ],
             ),
-            if (_selectedCategory == null)
+            if (provider.categoriesLoading && categories.isEmpty)
+              const LinearProgressIndicator()
+            else if (provider.categoriesFailed)
+              const Text('Could not load categories.')
+            else if (categories.isEmpty && !originalCategoryMissing)
+              const Text('Add a category from the Categories tab first.')
+            else if (_selectedCategory == null)
               const Padding(
                 padding: EdgeInsets.only(top: 6),
-                child: Text('Please select a category',
-                    style: TextStyle(color: AppTheme.expenseColor, fontSize: 12)),
+                child: Text(
+                  'Please select a category',
+                  style: TextStyle(color: AppTheme.expenseColor, fontSize: 12),
+                ),
               ),
             const SizedBox(height: 20),
 
             // ─── Date ───
-            const Text('Date',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            const Text(
+              'Date',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
             InkWell(
               onTap: () async {
+                final now = DateTime.now();
+                final earliest = DateTime(now.year - 2);
                 final picked = await showDatePicker(
                   context: context,
                   initialDate: _selectedDate,
-                  firstDate: DateTime(DateTime.now().year - 2),
-                  lastDate: DateTime.now(),
+                  firstDate: _selectedDate.isBefore(earliest)
+                      ? _selectedDate
+                      : earliest,
+                  lastDate: _selectedDate.isAfter(now) ? _selectedDate : now,
                 );
-                if (picked != null) setState(() => _selectedDate = picked);
+                if (picked != null && mounted) {
+                  setState(() => _selectedDate = picked);
+                }
               },
               borderRadius: BorderRadius.circular(12),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
@@ -262,16 +314,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.calendar_today_rounded,
-                        color: AppTheme.primaryColor),
+                    const Icon(
+                      Icons.calendar_today_rounded,
+                      color: AppTheme.primaryColor,
+                    ),
                     const SizedBox(width: 12),
                     Text(
                       Helpers.dateFormat.format(_selectedDate),
                       style: const TextStyle(fontSize: 16),
                     ),
                     const Spacer(),
-                    const Icon(Icons.arrow_drop_down,
-                        color: AppTheme.textSecondary),
+                    const Icon(
+                      Icons.arrow_drop_down,
+                      color: AppTheme.textSecondary,
+                    ),
                   ],
                 ),
               ),
@@ -279,9 +335,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             const SizedBox(height: 20),
 
             // ─── Note ───
-            const Text('Note (optional)',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            const Text(
+              'Note (optional)',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
             TextFormField(
               controller: _noteController,
@@ -308,7 +368,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         width: 24,
                         height: 24,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2.5),
+                          color: Colors.white,
+                          strokeWidth: 2.5,
+                        ),
                       )
                     : Text(
                         isEditing ? 'Update' : 'Save',
@@ -323,26 +385,39 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate() || _selectedCategory == null) return;
-
-    setState(() => _isSaving = true);
+    if (_isSaving ||
+        !_formKey.currentState!.validate() ||
+        _selectedCategory == null) {
+      return;
+    }
 
     final provider = context.read<AppProvider>();
-    final user = provider.user!;
+    final user = provider.user;
+    if (user == null) return;
+    final original = widget.editTransaction;
+    final categories = _type == TransactionType.income
+        ? provider.incomeCategories
+        : provider.expenseCategories;
+    if (!categories.any((category) => category.name == _selectedCategory) &&
+        !(original?.type == _type && original?.category == _selectedCategory)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose a category that still exists.')),
+      );
+      return;
+    }
+    setState(() => _isSaving = true);
 
     final transaction = TransactionModel(
-      id: isEditing ? widget.editTransaction!.id : const Uuid().v4(),
-      userId: user.uid,
-      userName: user.displayName ?? 'Unknown',
-      userPhotoUrl: user.photoURL ?? '',
+      id: original?.id ?? _newTransactionId,
+      userId: original?.userId ?? user.uid,
+      userName: original?.userName ?? Helpers.displayName(user.displayName),
+      userPhotoUrl: original?.userPhotoUrl ?? user.photoURL ?? '',
       type: _type,
       category: _selectedCategory!,
       amount: double.parse(_amountController.text),
       note: _noteController.text.trim(),
       date: _selectedDate,
-      createdAt: isEditing
-          ? widget.editTransaction!.createdAt
-          : DateTime.now(),
+      createdAt: original?.createdAt ?? DateTime.now(),
     );
 
     try {
@@ -352,11 +427,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         await provider.addTransaction(transaction);
       }
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (error) {
+      debugPrint('Could not save transaction: $error');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: const Text('Could not save the transaction. Try again.'),
             backgroundColor: AppTheme.expenseColor,
           ),
         );

@@ -15,6 +15,8 @@ class TransactionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isIncome = transaction.type == TransactionType.income;
     final color = isIncome ? AppTheme.incomeColor : AppTheme.expenseColor;
+    final userName = Helpers.displayName(transaction.userName);
+    final photoUrl = transaction.userPhotoUrl;
 
     return Dismissible(
       key: Key(transaction.id),
@@ -81,36 +83,44 @@ class TransactionCard extends StatelessWidget {
                       Row(
                         children: [
                           // User avatar
-                          if (transaction.userPhotoUrl.isNotEmpty)
-                            CircleAvatar(
-                              radius: 8,
-                              backgroundImage:
-                                  NetworkImage(transaction.userPhotoUrl),
-                            )
-                          else
-                            CircleAvatar(
-                              radius: 8,
-                              backgroundColor:
-                                  AppTheme.primaryColor.withValues(alpha: 0.2),
-                              child: Text(
-                                transaction.userName[0].toUpperCase(),
-                                style: const TextStyle(
-                                    fontSize: 8, fontWeight: FontWeight.bold),
+                          CircleAvatar(
+                            radius: 8,
+                            foregroundImage: photoUrl.isNotEmpty
+                                ? NetworkImage(photoUrl)
+                                : null,
+                            onForegroundImageError: photoUrl.isNotEmpty
+                                ? (_, _) {}
+                                : null,
+                            backgroundColor: AppTheme.primaryColor.withValues(
+                              alpha: 0.2,
+                            ),
+                            child: Text(
+                              userName.characters.first.toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
+                          ),
                           const SizedBox(width: 6),
-                          Text(
-                            transaction.userName.split(' ').first,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
+                          Flexible(
+                            child: Text(
+                              userName.split(' ').first,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
                             ),
                           ),
                           if (transaction.note.isNotEmpty) ...[
-                            const Text(' • ',
-                                style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 12)),
+                            const Text(
+                              ' • ',
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
                             Flexible(
                               child: Text(
                                 transaction.note,
@@ -128,12 +138,18 @@ class TransactionCard extends StatelessWidget {
                   ),
                 ),
                 // Amount
-                Text(
-                  '${isIncome ? '+' : '-'}${Helpers.formatAmount(transaction.amount)}',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: color,
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '${isIncome ? '+' : '-'}${Helpers.formatAmount(transaction.amount)}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -145,11 +161,15 @@ class TransactionCard extends StatelessWidget {
   }
 
   Future<bool> _confirmDelete(BuildContext context) async {
+    final provider = context.read<AppProvider>();
+    final messenger = ScaffoldMessenger.of(context);
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Transaction'),
-        content: const Text('Are you sure you want to delete this transaction?'),
+        content: const Text(
+          'Are you sure you want to delete this transaction?',
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
@@ -157,17 +177,30 @@ class TransactionCard extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
-              context.read<AppProvider>().deleteTransaction(transaction.id);
-              Navigator.pop(ctx, true);
-            },
+            onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.expenseColor),
+              backgroundColor: AppTheme.expenseColor,
+            ),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
-    return result ?? false;
+    if (result == true && context.mounted) {
+      try {
+        await provider.deleteTransaction(transaction.id);
+      } catch (error) {
+        debugPrint('Could not delete transaction: $error');
+        if (messenger.mounted) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Could not delete the transaction. Try again.'),
+            ),
+          );
+        }
+      }
+    }
+    // The Firestore snapshot removes the row, including after a local write.
+    return false;
   }
 }

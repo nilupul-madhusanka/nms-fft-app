@@ -25,13 +25,18 @@ class CategoryModel {
     };
   }
 
-  factory CategoryModel.fromMap(Map<String, dynamic> map) {
+  factory CategoryModel.fromMap(
+    Map<String, dynamic> map, {
+    String? documentId,
+  }) {
     return CategoryModel(
-      id: map['id'] ?? '',
+      id: documentId ?? map['id'] ?? '',
       name: map['name'] ?? '',
       icon: map['icon'] ?? '💰',
       type: map['type'] ?? 'expense',
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
+      createdAt:
+          (map['createdAt'] as Timestamp?)?.toDate() ??
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }
